@@ -233,6 +233,49 @@ def get_header(headers, name, default="Unknown"):
     )
 
 
+def get_headers(headers, name):
+    """Return every value for a potentially repeated message header."""
+    wanted_name = name.lower()
+    return [
+        header.get("value", "")
+        for header in headers
+        if header.get("name", "").lower() == wanted_name
+    ]
+
+
+def extract_authentication_results(headers):
+    """Extract SPF, DKIM, and DMARC verdicts added by receiving servers."""
+    primary_values = get_headers(headers, "authentication-results")
+    fallback_values = get_headers(headers, "arc-authentication-results")
+    results = {}
+
+    for method in ("spf", "dkim", "dmarc"):
+        pattern = re.compile(
+            rf"(?:^|[;\s]){method}\s*=\s*([a-z0-9_-]+)",
+            re.IGNORECASE,
+        )
+
+        matches = []
+        for values in (primary_values, fallback_values):
+            for value in values:
+                matches.extend(pattern.findall(value))
+            if matches:
+                break
+
+        if method == "spf" and not matches:
+            for value in get_headers(headers, "received-spf"):
+                match = re.match(r"\s*([a-z0-9_-]+)", value, re.IGNORECASE)
+                if match:
+                    matches.append(match.group(1))
+
+        # Retain distinct verdicts because a message can contain multiple DKIM
+        # signatures or authentication results from more than one receiver.
+        distinct_matches = list(dict.fromkeys(match.lower() for match in matches))
+        results[method] = ",".join(distinct_matches) if distinct_matches else "not_found"
+
+    return results
+
+
 def sanitize_log_value(value):
     """Keep each Wazuh event on one parseable key-value log line."""
     value = normalize_whitespace(str(value or ""))
@@ -288,6 +331,7 @@ def fetch_emails():
             subject = get_header(headers, "subject")
             sender = get_header(headers, "from")
             receiver = get_header(headers, "to")
+            authentication = extract_authentication_results(headers)
 
             body = extract_body(service, message_id, payload)
             body = sanitize_log_value(body)
@@ -304,6 +348,9 @@ def fetch_emails():
                 "from": sender,
                 "to": receiver,
                 "subject": subject,
+                "spf": authentication["spf"],
+                "dkim": authentication["dkim"],
+                "dmarc": authentication["dmarc"],
                 "body": body,
             }
             log_line = " ".join(

@@ -16,6 +16,7 @@ them as read.
 
 - Fetches unread messages received within the last five minutes
 - Extracts sender, recipient, subject, Gmail message ID, and timestamps
+- Collects SPF, DKIM, and DMARC authentication results
 - Handles plain-text and HTML email bodies
 - Preserves useful links found in HTML messages
 - Retrieves text MIME parts stored by Gmail as attachments
@@ -102,12 +103,14 @@ the Gmail query, the collector exits without adding an event.
 Each collected message has this format:
 
 ```text
-fetch_time="2026-07-19 11:30:00" sent_time="2026-07-19 11:29:00" integration="gmail" id="18f..." from="sender@example.com" to="recipient@example.com" subject="Example" body="Message text [Link: https://example.com]"
+fetch_time="2026-07-19 11:30:00" sent_time="2026-07-19 11:29:00" integration="gmail" id="18f..." from="sender@example.com" to="recipient@example.com" subject="Example" spf="pass" dkim="pass" dmarc="pass" body="Message text [Link: https://example.com]"
 ```
 
 The timestamps use the endpoint's local time zone. Whitespace, backslashes,
 and double quotes in field values are normalized to keep each event on one
-line.
+line. Authentication results are read from `Authentication-Results`, with
+`ARC-Authentication-Results` and `Received-SPF` used as fallbacks. A missing
+verdict is logged as `not_found`; multiple distinct verdicts are comma-separated.
 
 ### Schedule collection
 
@@ -158,8 +161,8 @@ Add these decoders to `/var/ossec/etc/decoder/local_decoder.xml`:
 
 <decoder name="gmail-custom-fields">
   <parent>gmail-custom</parent>
-  <regex type="pcre2">sent_time="([^"]+)"\s+integration="gmail"\s+id="([^"]+)"\s+from="([^"]+)"\s+to="([^"]+)"\s+subject="([^"]+)"\s+body="([^"]+)"</regex>
-  <order>gmail_sent_time, gmail_id, gmail_from, gmail_to, gmail_subject, gmail_body</order>
+  <regex type="pcre2">sent_time="([^"]+)"\s+integration="gmail"\s+id="([^"]+)"\s+from="([^"]+)"\s+to="([^"]+)"\s+subject="([^"]+)"\s+spf="([^"]+)"\s+dkim="([^"]+)"\s+dmarc="([^"]+)"\s+body="([^"]+)"</regex>
+  <order>gmail_sent_time, gmail_id, gmail_from, gmail_to, gmail_subject, gmail_spf, gmail_dkim, gmail_dmarc, gmail_body</order>
 </decoder>
 ```
 
