@@ -2,11 +2,11 @@
 
 This project collects recent unread Gmail messages through the Gmail API and
 writes them as single-line events for Wazuh. Wazuh can then collect, decode,
-classify, and deliver alerts generated from those events.
+and classify alerts generated from those events.
 
 ```text
 Gmail API -> fetch_gmail.py -> gmail_security.log -> Wazuh agent
-          -> Wazuh manager decoder -> phishing rules -> alert integration
+          -> Wazuh manager decoder -> phishing rules -> Wazuh alert
 ```
 
 The script uses read-only Gmail access. It does not modify messages or mark
@@ -155,11 +155,10 @@ the scheduled task. Subsequent unattended runs use the location saved in
 `config.json`. If the first execution is unattended and standard input reaches
 EOF, the default Wazuh path is selected and saved automatically.
 
-## 2. Wazuh Agent, Server Integration, and Delivery
+## 2. Wazuh Agent and Server Integration
 
 This section configures the endpoint agent to collect the Gmail event file and
-the Wazuh manager to decode it, apply phishing rules, and pass selected alerts
-to a custom delivery integration.
+the Wazuh manager to decode it and apply phishing rules.
 
 ### Configure log collection on the Wazuh agent
 
@@ -229,38 +228,14 @@ Rule `100300` records successfully decoded Gmail messages at level 3. Rule
 `100301` raises the level to 7 when the subject contains one of the configured
 high-risk keywords and maps the alert to MITRE ATT&CK technique T1566.001.
 
-### Configure alert delivery
-
-Add the delivery integration to the Wazuh manager's
-`/var/ossec/etc/ossec.conf`:
-
-```xml
-<integration>
-  <name>integration-script.py</name>
-  <rule_id>100302, 100303</rule_id> 
-  <alert_format>json</alert_format>
-</integration>
-```
-
-The delivery script must be installed in the manager's Wazuh integrations
-directory, have the name referenced by `<name>`, and be executable by Wazuh.
-The manager passes matching alerts to it as JSON.
-
-> **Rule ID check:** The supplied delivery configuration listens for rules
-> `100302` and `100303`, while the Gmail rules above define `100300` and
-> `100301`. If `100302` and `100303` are not defined elsewhere, change
-> `<rule_id>` to `100300,100301` to deliver the alerts created by this ruleset.
-
-After installing the decoder, rules, and integration, validate the manager
-configuration and restart the Wazuh manager. Generate or receive a test email
-with a subject such as `Urgent: verify invoice`, run the collector, and confirm
-the full flow:
+After installing the decoder and rules, validate the manager configuration and
+restart the Wazuh manager. Generate or receive a test email with a subject such
+as `Urgent: verify invoice`, run the collector, and confirm the full flow:
 
 1. A new line appears in `gmail_security.log` on the endpoint.
 2. The Wazuh agent forwards the line to the manager.
 3. The `gmail-custom` decoder extracts the Gmail fields.
 4. Rule `100300` matches the message and rule `100301` detects the keyword.
-5. The configured delivery integration receives the matching JSON alert.
 
 ## Security Notes
 
