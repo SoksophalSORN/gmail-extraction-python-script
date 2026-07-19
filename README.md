@@ -73,13 +73,15 @@ DEFAULT_LOG_FILE = (
 TOKEN_FILE = "token.json"
 CREDENTIALS_FILE = "credentials.json"
 CONFIG_FILE = Path(__file__).resolve().with_name("config.json")
-GMAIL_QUERY = "is:unread newer_than:5m"
+LOOKBACK_SECONDS = 5 * 60
 MAX_BODY_LENGTH = 2000
 ```
 
-`GMAIL_QUERY` accepts Gmail search syntax. The default query selects unread
-mail from the last five minutes. Because the collector has read-only access,
-running it more than once during that window can log the same message again.
+On each run, the collector builds an `is:unread after:<epoch>` Gmail query using
+the current time minus `LOOKBACK_SECONDS`. This provides a true five-minute
+window; Gmail's `newer_than` operator does not support minutes. Because the
+collector has read-only access, running it more than once during that window
+can log the same message again.
 
 ### Run and authorize the collector
 
@@ -119,7 +121,7 @@ the Gmail query, the collector exits without adding an event.
 Each collected message has this format (shortened here for readability):
 
 ```text
-fetch_time="2026-07-19 11:30:00" gmail_received_time="2026-07-19 11:29:00" header_date="Sun, 19 Jul 2026 11:28:50 +0700" integration="gmail" gmail_id="18f..." rfc_message_id="<message@example.com>" thread_id="18f..." from="Sender <sender@example.com>" to="recipient@example.com" cc="not_found" reply_to="reply@example.com" return_path="<bounce@example.com>" in_reply_to="not_found" references="not_found" subject="Example" spf="pass" spf_domain="example.com" dkim="pass" dkim_domain="example.com" dkim_selector="selector1" dmarc="pass" dmarc_domain="example.com" source_ip="203.0.113.10" urls="https://example.com/login" url_domains="example.com" attachment_count="1" attachment_filenames="invoice.pdf" attachment_types="application/pdf" attachment_sizes="48291" body="Message text [Link: https://example.com/login]"
+fetch_time="2026-07-19 11:30:00" gmail_received_time="2026-07-19 11:29:00" header_date="Sun, 19 Jul 2026 11:28:50 +0700" integration="gmail" gmail_id="18f..." rfc_message_id="<message@example.com>" thread_id="18f..." from="Sender <sender@example.com>" to="recipient@example.com" cc="not_found" reply_to="reply@example.com" return_path="<bounce@example.com>" in_reply_to="not_found" references="not_found" subject="Example" spf="pass" spf_domain="example.com" dkim="pass" dkim_domain="example.com" dkim_selector="selector1" dmarc="pass" dmarc_domain="example.com" source_ip="203.0.113.10" urls="https://example.com/login" url_domains="example.com" attachment_count="0" attachment_filenames="none" attachment_types="none" attachment_sizes="none" body="Message text [Link: https://example.com/login]"
 ```
 
 `gmail_received_time` comes from Gmail's internal timestamp and uses the
@@ -190,13 +192,15 @@ Add these decoders to `/var/ossec/etc/decoder/local_decoder.xml`:
 
 <decoder name="gmail-custom-fields">
   <parent>gmail-custom</parent>
-  <regex type="pcre2">fetch_time="([^"]+)"\s+gmail_received_time="([^"]+)"\s+header_date="([^"]+)"\s+integration="gmail"\s+gmail_id="([^"]+)"\s+rfc_message_id="([^"]+)"\s+thread_id="([^"]+)"\s+from="([^"]+)"\s+to="([^"]+)"\s+cc="([^"]+)"\s+reply_to="([^"]+)"\s+return_path="([^"]+)"\s+in_reply_to="([^"]+)"\s+references="([^"]+)"\s+subject="([^"]+)"\s+spf="([^"]+)"\s+spf_domain="([^"]+)"\s+dkim="([^"]+)"\s+dkim_domain="([^"]+)"\s+dkim_selector="([^"]+)"\s+dmarc="([^"]+)"\s+dmarc_domain="([^"]+)"\s+source_ip="([^"]+)"\s+urls="([^"]+)"\s+url_domains="([^"]+)"\s+attachment_count="([^"]+)"\s+attachment_filenames="([^"]+)"\s+attachment_types="([^"]+)"\s+attachment_sizes="([^"]+)"\s+body="([^"]+)"</regex>
+  <regex type="pcre2">fetch_time="([^"]*)"\s+gmail_received_time="([^"]*)"\s+header_date="([^"]*)"\s+integration="gmail"\s+gmail_id="([^"]*)"\s+rfc_message_id="([^"]*)"\s+thread_id="([^"]*)"\s+from="([^"]*)"\s+to="([^"]*)"\s+cc="([^"]*)"\s+reply_to="([^"]*)"\s+return_path="([^"]*)"\s+in_reply_to="([^"]*)"\s+references="([^"]*)"\s+subject="([^"]*)"\s+spf="([^"]*)"\s+spf_domain="([^"]*)"\s+dkim="([^"]*)"\s+dkim_domain="([^"]*)"\s+dkim_selector="([^"]*)"\s+dmarc="([^"]*)"\s+dmarc_domain="([^"]*)"\s+source_ip="([^"]*)"\s+urls="([^"]*)"\s+url_domains="([^"]*)"\s+attachment_count="([^"]*)"\s+attachment_filenames="([^"]*)"\s+attachment_types="([^"]*)"\s+attachment_sizes="([^"]*)"\s+body="([^"]*)"</regex>
   <order>gmail_fetch_time, gmail_received_time, gmail_header_date, gmail_id, gmail_rfc_message_id, gmail_thread_id, gmail_from, gmail_to, gmail_cc, gmail_reply_to, gmail_return_path, gmail_in_reply_to, gmail_references, gmail_subject, gmail_spf, gmail_spf_domain, gmail_dkim, gmail_dkim_domain, gmail_dkim_selector, gmail_dmarc, gmail_dmarc_domain, gmail_source_ip, gmail_urls, gmail_url_domains, gmail_attachment_count, gmail_attachment_filenames, gmail_attachment_types, gmail_attachment_sizes, gmail_body</order>
 </decoder>
 ```
 
 The parent decoder identifies events containing `integration="gmail"`. The
-child decoder extracts the Gmail fields used by the rules.
+child decoder extracts the Gmail fields used by the rules. Each quoted capture
+accepts an empty value so one unavailable header cannot prevent the rest of the
+event from being decoded.
 
 This decoder replaces the earlier version because `sent_time` is now the more
 accurately named `gmail_received_time`, `id` is now `gmail_id`, and the new

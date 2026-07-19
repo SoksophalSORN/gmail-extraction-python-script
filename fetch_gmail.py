@@ -4,6 +4,7 @@ import ipaddress
 import json
 import os
 import re
+import time
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -21,7 +22,7 @@ DEFAULT_LOG_FILE = (
 TOKEN_FILE = "token.json"
 CREDENTIALS_FILE = "credentials.json"
 CONFIG_FILE = Path(__file__).resolve().with_name("config.json")
-GMAIL_QUERY = "is:unread newer_than:5m"
+LOOKBACK_SECONDS = 5 * 60
 MAX_BODY_LENGTH = 2000
 WEB_URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 
@@ -510,7 +511,8 @@ def extract_source_ip(headers):
 
 def sanitize_log_value(value):
     """Keep each Wazuh event on one parseable key-value log line."""
-    value = normalize_whitespace(str(value or ""))
+    value = "" if value is None else str(value)
+    value = normalize_whitespace(value)
     return value.replace("\\", "/").replace('"', "'")
 
 
@@ -522,6 +524,22 @@ def serialize_log_list(values, default="none"):
         if str(value).strip()
     ]
     return " | ".join(serialized) if serialized else default
+
+
+def format_log_line(fields):
+    """Serialize an ordered field mapping as a one-line Wazuh event."""
+    return " ".join(
+        f'{key}="{sanitize_log_value(value)}"'
+        for key, value in fields.items()
+    )
+
+
+def build_gmail_query(current_epoch=None):
+    """Build an unread-mail query using a true five-minute epoch cutoff."""
+    if current_epoch is None:
+        current_epoch = time.time()
+    cutoff_epoch = int(current_epoch) - LOOKBACK_SECONDS
+    return f"is:unread after:{cutoff_epoch}"
 
 
 def format_local_timestamp(timestamp):
@@ -569,7 +587,7 @@ def fetch_emails():
     results = (
         service.users()
         .messages()
-        .list(userId="me", q=GMAIL_QUERY)
+        .list(userId="me", q=build_gmail_query())
         .execute()
     )
     messages = results.get("messages", [])
@@ -666,10 +684,7 @@ def fetch_emails():
                 ),
                 "body": body,
             }
-            log_line = " ".join(
-                f'{key}="{sanitize_log_value(value)}"'
-                for key, value in fields.items()
-            )
+            log_line = format_log_line(fields)
             log_file.write(log_line + "\n")
 
 
