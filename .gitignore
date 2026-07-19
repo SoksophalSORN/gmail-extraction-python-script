@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Test Folder and Artifacts
+test/*
+test/
+credentials.json
+token.json
+config.json
