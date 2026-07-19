@@ -15,11 +15,13 @@ them as read.
 ## Features
 
 - Fetches unread messages received within the last five minutes
-- Extracts sender, recipient, subject, Gmail message ID, and timestamps
-- Collects SPF, DKIM, and DMARC authentication results
+- Extracts sender, recipient, reply, routing, thread, and message identifiers
+- Collects SPF, DKIM, and DMARC verdicts, domains, and the DKIM selector
+- Extracts web URLs and their domains before the body is truncated
+- Records attachment filenames, MIME types, and sizes without downloading them
 - Handles plain-text and HTML email bodies
 - Preserves useful links found in HTML messages
-- Retrieves text MIME parts stored by Gmail as attachments
+- Retrieves attachment-backed text when Gmail stores body content separately
 - Normalizes values into one-line events suitable for Wazuh
 - Limits logged message bodies to 2,000 characters
 
@@ -100,17 +102,29 @@ On the first run, a browser opens for Google authorization. The resulting
 credentials are stored in `token.json` for later runs. If no messages match
 the Gmail query, the collector exits without adding an event.
 
-Each collected message has this format:
+Each collected message has this format (shortened here for readability):
 
 ```text
-fetch_time="2026-07-19 11:30:00" sent_time="2026-07-19 11:29:00" integration="gmail" id="18f..." from="sender@example.com" to="recipient@example.com" subject="Example" spf="pass" dkim="pass" dmarc="pass" body="Message text [Link: https://example.com]"
+fetch_time="2026-07-19 11:30:00" gmail_received_time="2026-07-19 11:29:00" header_date="Sun, 19 Jul 2026 11:28:50 +0700" integration="gmail" gmail_id="18f..." rfc_message_id="<message@example.com>" thread_id="18f..." from="Sender <sender@example.com>" to="recipient@example.com" cc="not_found" reply_to="reply@example.com" return_path="<bounce@example.com>" in_reply_to="not_found" references="not_found" subject="Example" spf="pass" spf_domain="example.com" dkim="pass" dkim_domain="example.com" dkim_selector="selector1" dmarc="pass" dmarc_domain="example.com" source_ip="203.0.113.10" urls="https://example.com/login" url_domains="example.com" attachment_count="1" attachment_filenames="invoice.pdf" attachment_types="application/pdf" attachment_sizes="48291" body="Message text [Link: https://example.com/login]"
 ```
 
-The timestamps use the endpoint's local time zone. Whitespace, backslashes,
-and double quotes in field values are normalized to keep each event on one
-line. Authentication results are read from `Authentication-Results`, with
-`ARC-Authentication-Results` and `Received-SPF` used as fallbacks. A missing
-verdict is logged as `not_found`; multiple distinct verdicts are comma-separated.
+`gmail_received_time` comes from Gmail's internal timestamp and uses the
+endpoint's local time zone. `header_date` retains the date claimed by the
+sender. Whitespace, backslashes, and double quotes in values are normalized so
+each event stays on one line.
+
+Authentication data is read from Gmail's `mx.google.com`
+`Authentication-Results` when available, with `ARC-Authentication-Results` and
+`Received-SPF` as fallbacks. The collector also records the SPF mail-from
+domain, DKIM signing domain and selector, DMARC header-from domain, and the
+client IP observed at Gmail's receiving boundary.
+
+URLs are collected from plain text, visible HTML text, and HTML `href`, `src`,
+and `action` attributes before the body is limited to 2,000 characters.
+Attachment contents are not downloaded; the collector reads only the filename,
+MIME type, and declared byte size already present in the Gmail message payload.
+Multiple values are separated with ` | `. Missing optional headers and
+authentication values are logged as `not_found`; empty lists use `none`.
 
 ### Schedule collection
 
@@ -161,13 +175,17 @@ Add these decoders to `/var/ossec/etc/decoder/local_decoder.xml`:
 
 <decoder name="gmail-custom-fields">
   <parent>gmail-custom</parent>
-  <regex type="pcre2">sent_time="([^"]+)"\s+integration="gmail"\s+id="([^"]+)"\s+from="([^"]+)"\s+to="([^"]+)"\s+subject="([^"]+)"\s+spf="([^"]+)"\s+dkim="([^"]+)"\s+dmarc="([^"]+)"\s+body="([^"]+)"</regex>
-  <order>gmail_sent_time, gmail_id, gmail_from, gmail_to, gmail_subject, gmail_spf, gmail_dkim, gmail_dmarc, gmail_body</order>
+  <regex type="pcre2">fetch_time="([^"]+)"\s+gmail_received_time="([^"]+)"\s+header_date="([^"]+)"\s+integration="gmail"\s+gmail_id="([^"]+)"\s+rfc_message_id="([^"]+)"\s+thread_id="([^"]+)"\s+from="([^"]+)"\s+to="([^"]+)"\s+cc="([^"]+)"\s+reply_to="([^"]+)"\s+return_path="([^"]+)"\s+in_reply_to="([^"]+)"\s+references="([^"]+)"\s+subject="([^"]+)"\s+spf="([^"]+)"\s+spf_domain="([^"]+)"\s+dkim="([^"]+)"\s+dkim_domain="([^"]+)"\s+dkim_selector="([^"]+)"\s+dmarc="([^"]+)"\s+dmarc_domain="([^"]+)"\s+source_ip="([^"]+)"\s+urls="([^"]+)"\s+url_domains="([^"]+)"\s+attachment_count="([^"]+)"\s+attachment_filenames="([^"]+)"\s+attachment_types="([^"]+)"\s+attachment_sizes="([^"]+)"\s+body="([^"]+)"</regex>
+  <order>gmail_fetch_time, gmail_received_time, gmail_header_date, gmail_id, gmail_rfc_message_id, gmail_thread_id, gmail_from, gmail_to, gmail_cc, gmail_reply_to, gmail_return_path, gmail_in_reply_to, gmail_references, gmail_subject, gmail_spf, gmail_spf_domain, gmail_dkim, gmail_dkim_domain, gmail_dkim_selector, gmail_dmarc, gmail_dmarc_domain, gmail_source_ip, gmail_urls, gmail_url_domains, gmail_attachment_count, gmail_attachment_filenames, gmail_attachment_types, gmail_attachment_sizes, gmail_body</order>
 </decoder>
 ```
 
 The parent decoder identifies events containing `integration="gmail"`. The
 child decoder extracts the Gmail fields used by the rules.
+
+This decoder replaces the earlier version because `sent_time` is now the more
+accurately named `gmail_received_time`, `id` is now `gmail_id`, and the new
+investigation fields occur between those values and the body.
 
 ### Add the phishing detection rules
 
