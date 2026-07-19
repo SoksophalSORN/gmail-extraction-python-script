@@ -219,5 +219,6 @@ __marimo__/
 
 # Test Folder and Artifacts
 test/*
+test/
 credentials.json
 token.json
