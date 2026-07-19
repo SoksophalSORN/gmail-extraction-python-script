@@ -222,3 +222,4 @@ test/*
 test/
 credentials.json
 token.json
+config.json
