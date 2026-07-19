@@ -1,9 +1,11 @@
 import base64
 import datetime
 import ipaddress
+import json
 import os
 import re
 from html.parser import HTMLParser
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from google.auth.transport.requests import Request
@@ -18,6 +20,7 @@ DEFAULT_LOG_FILE = (
 )
 TOKEN_FILE = "token.json"
 CREDENTIALS_FILE = "credentials.json"
+CONFIG_FILE = Path(__file__).resolve().with_name("config.json")
 GMAIL_QUERY = "is:unread newer_than:5m"
 MAX_BODY_LENGTH = 2000
 WEB_URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
@@ -525,18 +528,43 @@ def format_local_timestamp(timestamp):
     return timestamp.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def prompt_for_log_file():
-    """Ask where to write events, using the Wazuh path when left blank."""
+def get_log_file_path():
+    """Load the persisted log path or ask for it on the first execution."""
+    try:
+        config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        saved_path = config.get("log_file", "") if isinstance(config, dict) else ""
+        if isinstance(saved_path, str) and saved_path.strip():
+            return os.path.expanduser(saved_path.strip())
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        pass
+
     prompt = f"Log file location [{DEFAULT_LOG_FILE}]: "
     try:
         selected_path = input(prompt).strip().strip('"')
     except EOFError:
         selected_path = ""
-    return os.path.expanduser(selected_path) if selected_path else DEFAULT_LOG_FILE
+
+    if selected_path:
+        log_file_path = os.path.expanduser(selected_path)
+        is_windows_absolute = bool(re.match(r"^[a-z]:[\\/]", log_file_path, re.I))
+        if not os.path.isabs(log_file_path) and not is_windows_absolute:
+            log_file_path = os.path.abspath(log_file_path)
+    else:
+        log_file_path = DEFAULT_LOG_FILE
+
+    try:
+        CONFIG_FILE.write_text(
+            json.dumps({"log_file": log_file_path}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as error:
+        print(f"Warning: could not save log file configuration: {error}")
+
+    return log_file_path
 
 
 def fetch_emails():
-    log_file_path = prompt_for_log_file()
+    log_file_path = get_log_file_path()
     service = get_gmail_service()
     results = (
         service.users()

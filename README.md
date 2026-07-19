@@ -72,6 +72,7 @@ DEFAULT_LOG_FILE = (
 )
 TOKEN_FILE = "token.json"
 CREDENTIALS_FILE = "credentials.json"
+CONFIG_FILE = Path(__file__).resolve().with_name("config.json")
 GMAIL_QUERY = "is:unread newer_than:5m"
 MAX_BODY_LENGTH = 2000
 ```
@@ -88,7 +89,7 @@ Run the script from the project directory:
 python fetch_gmail.py
 ```
 
-The collector asks where it should write the log:
+On the first execution, the collector asks where it should write the log:
 
 ```text
 Log file location [C:\Program Files (x86)\ossec-agent\active-response\gmail_security.log]:
@@ -96,7 +97,20 @@ Log file location [C:\Program Files (x86)\ossec-agent\active-response\gmail_secu
 
 Press Enter to use the Wazuh agent path shown in brackets, or enter another
 path. The selected directory must already exist, and the account running the
-collector must be allowed to append to the file.
+collector must be allowed to append to the file. Relative paths are converted
+to absolute paths.
+
+The selection is stored in `config.json` beside the script. Later executions
+load it without prompting. To select a different location, delete `config.json`
+and run the collector again, or edit its `log_file` value directly:
+
+```json
+{
+  "log_file": "C:\\Program Files (x86)\\ossec-agent\\active-response\\gmail_security.log"
+}
+```
+
+`config.json` is machine-specific and excluded from Git.
 
 On the first run, a browser opens for Google authorization. The resulting
 credentials are stored in `token.json` for later runs. If no messages match
@@ -136,8 +150,10 @@ task to:
 - pass the absolute path to `fetch_gmail.py` as an argument; and
 - use the project directory as the working directory.
 
-An unattended run receives no interactive input, so the collector uses the
-default Wazuh log path when standard input reaches EOF.
+Authorize the collector and select its log path interactively before enabling
+the scheduled task. Subsequent unattended runs use the location saved in
+`config.json`. If the first execution is unattended and standard input reaches
+EOF, the default Wazuh path is selected and saved automatically.
 
 ## 2. Wazuh Agent, Server Integration, and Delivery
 
